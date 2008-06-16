@@ -28,6 +28,7 @@ $VERSION =~ s/_/./g;
 
 use Time::ParseDate;
 use POSIX qw(strftime);
+use POSIX ":sys_wait_h";
 use Getopt::Long;
 
 sub loadconfig;
@@ -94,22 +95,63 @@ else
 }
 $$Config{Dirvish} ||= 'dirvish';
 
+$$Config{concurrent} ||= '1';
+@pidList = ();
+
 $$Options{'no-run'} and $$Options{quiet} = 0;
 
 $errors = 0;
 
 for $sched (@{$$Config{Runall}})
 {
+	# Wait until we have a free slot
+	until (scalar(@pidList) < int($$Config{concurrent})) {
+		@pidList2 = ();
+		for $pid (@pidList) {
+			$wait_result = waitpid($pid, WNOHANG);
+			if ($wait_result > 0) {
+				# Increment the error counter if dirvish failed
+				$? < 0 || $? / 256 and ++$errors;
+			} else {
+				# Keep PID
+				push(@pidList2, $pid);
+			}
+		}
+		# Put all unsuccessful PIDs back in pidList
+		@pidList = @pidList2;
+		sleep(1);
+	}
+
+	# Spawn Child
 	($vault, $itime) = split(/\s+/, $sched);
 	$cmd = "$$Config{Dirvish} --vault $vault";
 	$itime and $cmd .= qq[ --image-time "$itime"];
 	$$Options{quiet}
 		or printf "%s %s\n", strftime('%H:%M:%S', localtime), $cmd;
 	$$Options{'no-run'} and next;
-	$status = system($cmd);
-	$status < 0 || $status / 256 and ++$errors;
-
+	$pid = fork();
+	if ($pid > 0) {
+		# Parent thread, register child pid
+		push(@pidList, $pid);
+	} elsif ($pid == -1) {
+		# Failed fork
+		print "Fork failed!\n";
+	} else {
+		# pid == 0, child thread
+		exec($cmd) || die "child exit";
+	}
 }
+
+# Wait for remaining dirvish processes
+for $pid (@pidList) {
+	# Wait forever this time
+	$wait_result = waitpid($pid, 0);
+	if ($wait_result == -1 or $wait_result == $pid) {
+		# Increment the error counter if dirvish failed
+		$? < 0 || $? / 256 and ++$errors;
+	}
+}
+
 $$Options{quiet}
 	or printf "%s %s\n", strftime('%H:%M:%S', localtime), 'done';
 
