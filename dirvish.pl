@@ -936,14 +936,14 @@ sub scriptrun
 	if ($A{dir} !~ /^:/)
 	{
 		$rcmd = sprintf ("%s 'cd %s; %s %s' >>%s",
-			("$A{shell}" || "/bin/sh -c"),
+			($A{shell} || "/bin/sh -c"),
 			$A{dir}, $A{env},
 			$cmd,
 			$A{log}
 		);
 	} else {
 		$rcmd = sprintf ("%s '%s %s' >>%s",
-			("$A{shell}" || "/bin/sh -c"),
+			($A{shell} || "/bin/sh -c"),
 			$A{env},
 			$cmd,
 			$A{log}
